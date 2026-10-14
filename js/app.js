@@ -483,10 +483,20 @@
 
   // ---------- старт ----------
   render();
-  if (!catalog || (catalog.source === BUILTIN_SOURCE && catalog.version !== BUILTIN_VERSION)) {
+  // «пример» — тестовый каталог из 11 товаров первой версии, заменяем на каталог магазина.
+  const outdated = catalog && (catalog.source === 'пример' || (catalog.source === BUILTIN_SOURCE && catalog.version !== BUILTIN_VERSION));
+  if (!catalog || outdated) {
     loadBuiltin(true).catch(() => {});
   }
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    // Когда скачалась новая версия приложения — перезагружаемся, чтобы она включилась сразу.
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloaded) return;
+      reloaded = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register('sw.js').then((reg) => reg.update()).catch(() => {});
   }
 })();

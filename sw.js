@@ -1,6 +1,6 @@
 // Офлайн-режим: все файлы приложения хранятся на телефоне.
 // При изменении файлов увеличивайте VERSION, чтобы телефоны получили обновление.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const FILES = [
   './',
   'index.html',
@@ -18,7 +18,7 @@ const FILES = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
