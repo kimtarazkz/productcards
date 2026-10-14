@@ -19,19 +19,22 @@
   };
   // Дюймовые размеры словами.
   const FRACTION_PHRASES = [
+    [/пол ?метра/g, ' 0.5 м '],
     [/полтора дюйма|полтора|полторы/g, ' 1.5 '],
     [/три четверти|три четвертых/g, ' 0.75 '],
     [/пол дюйма|полдюйма|одна вторая|половина/g, ' 0.5 '],
     [/одна четвертая|четверть/g, ' 0.25 '],
   ];
 
-  const QTY_WORDS = /^(шт|штук|штуки|штука|штучки|штучек|штуку|шту|pcs)$/;
+  // Слова-единицы, после которых число — это количество: «2 штуки», «3 баллона», «1 комплект».
+  const QTY_WORDS = /^(шт|штук|штуки|штука|штучки|штучек|штуку|шту|pcs|баллон[а-я]*|комплект[а-я]*|рулон[а-я]*|тюбик[а-я]*|упаковк[а-я]*|пачк[а-я]*|пар|пары|пару|бутыл[а-я]*)$/;
   const LENGTH_WORDS = /^(м|метр|метра|метров|метры|метрa)$/;
   // Слова, которые не являются частью названия товара.
   const STOP_WORDS = new Set([
     'диаметр', 'диаметром', 'диаметра', 'диам', 'ф', 'д', 'd', 'мм', 'миллиметров',
     'на', 'по', 'x', 'х', 'и', 'с', 'еще', 'ещё', 'также', 'размер', 'дюйм', 'дюйма',
-    'дюймов', 'длина', 'длиной', 'нужно', 'надо', 'дай', 'давай', 'плюс',
+    'дюймов', 'длина', 'длиной', 'нужно', 'надо', 'дай', 'давай', 'плюс', 'для',
+    'градусов', 'градуса', 'градус', 'вот', 'так', 'тоже', 'а', 'еще', 'добавь', 'запиши',
   ]);
 
   function normalize(text) {
@@ -67,7 +70,22 @@
       if (/^\d+(\.\d+)?$/.test(r)) { out.push({ t: 'num', v: parseFloat(r), raw: r }); continue; }
       if (/^[a-zа-я0-9]+$/.test(r)) out.push({ t: 'word', w: r });
     }
-    return joinNumberWords(joinMixedFractions(out));
+    return addImplicitOne(joinNumberWords(joinMixedFractions(out)));
+  }
+
+  // «труба 50 метр» → «труба 50 1 м»
+  function addImplicitOne(tokens) {
+    const out = [];
+    for (const tk of tokens) {
+      const prev = out[out.length - 1];
+      // «50 метр» — тоже 1 метр: после 50 сказали бы «метров».
+      const one = prev && prev.t === 'num' && tk.w === 'метр' && !(prev.v % 10 === 1 && prev.v % 100 !== 11);
+      if (tk.t === 'word' && LENGTH_WORDS.test(tk.w) && (!(prev && prev.t === 'num') || one)) {
+        out.push({ t: 'num', v: 1, raw: '1' });
+      }
+      out.push(tk);
+    }
+    return out;
   }
 
   // «1 1/2» → 1.5
@@ -145,8 +163,19 @@
   }
 
   // Похожесть двух слов 0..1 с учётом окончаний и ошибок распознавания.
+  const simCache = new Map();
   function wordSim(a, b) {
     if (a === b) return 1;
+    const key = a < b ? a + '|' + b : b + '|' + a;
+    let v = simCache.get(key);
+    if (v === undefined) {
+      v = wordSimRaw(a, b);
+      if (simCache.size > 50000) simCache.clear();
+      simCache.set(key, v);
+    }
+    return v;
+  }
+  function wordSimRaw(a, b) {
     const minLen = Math.min(a.length, b.length);
     if (minLen < 3) return 0;
     let p = 0;
@@ -185,13 +214,6 @@
     return { products, vocab };
   }
 
-  function isVocabWord(w, vocab) {
-    if (STOP_WORDS.has(w)) return false;
-    if (vocab.has(w)) return true;
-    for (const v of vocab) if (wordSim(w, v) >= 0.85) return true;
-    return false;
-  }
-
   // «пол отвод» → «полотвод» ~ «полуотвод»
   function mergeSplitWords(tokens, vocab) {
     const out = [];
@@ -212,36 +234,13 @@
     return out;
   }
 
-  // ---------- разбиение на позиции ----------
-  function segment(tokens, vocab) {
-    const segs = [];
-    let cur = [];
-    const curHasNum = () => cur.some((t) => t.t === 'num');
-    const curHasWord = () => cur.some((t) => t.t === 'word' && isVocabWord(t.w, vocab));
-    const push = () => {
-      if (cur.length) segs.push(cur);
-      cur = [];
-    };
-    for (let i = 0; i < tokens.length; i++) {
-      const tk = tokens[i];
-      if (tk.t === 'sep') { push(); continue; }
-      if (tk.t === 'word' && tk.w === 'и' && curHasNum()) { push(); continue; }
-      if (tk.t === 'word' && isVocabWord(tk.w, vocab) && curHasNum() && curHasWord()) {
-        const prev = cur[cur.length - 1];
-        if (!(prev && prev.t === 'word' && isVocabWord(prev.w, vocab))) push();
-      }
-      cur.push(tk);
-    }
-    push();
-    return segs;
-  }
-
-  // Разметка чисел сегмента: количество, длина, размер.
+  // ---------- разбор одной позиции ----------
+  // Числа сегмента: количество («2 штуки»), остальные — размеры и длина.
   function analyzeSegment(seg) {
     const words = [];
     const sizes = [];
+    const lengths = []; // «3 метра»
     let qty = null;
-    let qtyExplicit = false;
     for (let i = 0; i < seg.length; i++) {
       const tk = seg[i];
       if (tk.t === 'word') {
@@ -250,15 +249,17 @@
       }
       if (tk.t !== 'num') continue;
       const next = seg[i + 1];
-      if (next && next.t === 'word' && QTY_WORDS.test(next.w) && !qtyExplicit) {
+      if (next && next.t === 'word' && QTY_WORDS.test(next.w) && qty === null) {
         qty = tk.v;
-        qtyExplicit = true;
+        continue;
+      }
+      if (next && next.t === 'word' && LENGTH_WORDS.test(next.w)) {
+        lengths.push(tk.v);
         continue;
       }
       sizes.push(tk.v);
     }
-    // «штуки» без числа впереди, но с числом после: «штук 5»
-    return { words, sizes, qty, qtyExplicit };
+    return { words, sizes, lengths, qty };
   }
 
   function numEq(a, b) {
@@ -279,52 +280,60 @@
     return { matched, missing: productNums.length - matched, extra: left };
   }
 
+  // Похожесть слов фразы на слова названия: 0..1 и число слов фразы, которых в названии нет.
   function wordScore(segWords, alias) {
-    if (!alias.words.length || !segWords.length) return 0;
+    if (!alias.words.length || !segWords.length) return null;
+    // Главное слово (первое) обязано совпасть, иначе это другой товар.
+    let head = 0;
+    for (const sw of segWords) head = Math.max(head, wordSim(sw, alias.words[0]));
+    if (head === 0) return null;
     let sum = 0;
     for (const aw of alias.words) {
       let best = 0;
       for (const sw of segWords) best = Math.max(best, wordSim(sw, aw));
       sum += best;
     }
-    // Главное слово (первое) обязано совпасть, иначе это другой товар.
-    const head = Math.max(0, ...segWords.map((sw) => wordSim(sw, alias.words[0])));
-    if (head === 0) return 0;
-    // Слова фразы, которых нет в названии, тоже снижают оценку: «пол отвод» ближе к полуотводу, чем к отводу.
+    let unknown = 0;
     let segHit = 0;
-    for (const sw of segWords) segHit += Math.max(0, ...alias.words.map((aw) => wordSim(sw, aw)));
-    return (sum / alias.words.length + segHit / segWords.length) / 2;
+    for (const sw of segWords) {
+      let best = 0;
+      for (const aw of alias.words) best = Math.max(best, wordSim(sw, aw));
+      segHit += best;
+      if (best === 0) unknown++;
+    }
+    return { ws: (sum / alias.words.length + segHit / segWords.length) / 2, unknown };
   }
 
   function scoreProduct(product, a) {
-    let ws = 0;
-    let sizes = a.sizes;
+    let best = null;
     product.aliases.forEach((al, k) => {
-      // Числа синонима («отвод 45» = 45 градусов) должны прозвучать, иначе синоним не подходит.
+      // Числа синонима («угол 45 на 20» = 45 градусов) должны прозвучать, иначе синоним не подходит.
       const own = al.nums.filter((n) => !product.nums.some((p) => numEq(p, n)));
       const m = matchNumbers(own, a.sizes);
       if (m.missing) return;
+      const w = wordScore(a.words, al);
+      if (!w) return;
       // Название товара чуть важнее синонима при равенстве.
-      let s = wordScore(a.words, al);
-      if (s > 0 && k === 0) s += 0.05;
-      if (s > ws) {
-        ws = s;
-        sizes = m.extra;
-      }
+      const s = w.ws + (k === 0 ? 0.02 : 0) + own.length * 0.05;
+      if (!best || s > best.s) best = { s, ws: w.ws, unknown: w.unknown, sizes: m.extra };
     });
-    if (ws === 0) return null;
-    const nm = matchNumbers(product.nums, sizes);
+    if (!best) return null;
+    const nm = matchNumbers(product.nums, best.sizes.concat(a.lengths));
+    // Длина, которой нет в названии («труба 50, 3 метра» при штучной трубе), — просто пояснение.
+    const extraSizes = nm.extra.slice();
+    for (const l of a.lengths) {
+      const k = extraSizes.findIndex((x) => numEq(x, l));
+      if (k >= 0) extraSizes.splice(k, 1);
+    }
     // Число без «штук», оставшееся после размеров, считаем количеством.
     let qty = a.qty;
-    let extra = nm.extra;
-    let qtyGuessed = false;
+    let extra = extraSizes;
     if (qty === null && extra.length) {
       qty = extra[extra.length - 1];
       extra = extra.slice(0, -1);
-      qtyGuessed = true;
     }
-    const score = ws * 10 + nm.matched * 3 - nm.missing * 4 - extra.length * 2;
-    return { product, score, ws, missing: nm.missing, extra, qty, qtyGuessed };
+    const score = best.s * 10 + nm.matched * 3 - nm.missing * 4 - extra.length * 3 - best.unknown * 6;
+    return { product, score, ws: best.ws, missing: nm.missing, extra, qty, spokenSizes: a.sizes.length };
   }
 
   // Варианты прочтения: «52 штуки» могло быть «50, 2 штуки» (пятьдесят две).
@@ -335,13 +344,13 @@
     for (const n of all) {
       const u = n.v % 10;
       if (!Number.isInteger(n.v) || n.v < 20 || u === 0) continue;
+      if (!n.isQty && a.qty !== null) continue; // количество уже названо отдельно
       const size = n.v - u;
       const sizes = a.sizes.slice();
       if (n.isQty) sizes.push(size);
       else sizes.splice(n.i, 1, size);
-      if (!n.isQty && a.qty !== null) continue; // количество уже названо отдельно
       list.push({
-        a: { ...a, sizes, qty: u, qtyExplicit: true },
+        a: { ...a, sizes, qty: u },
         note: `«${n.v}» понято как размер ${size} и ${u} шт`,
         penalty: 1,
       });
@@ -349,42 +358,112 @@
     return list;
   }
 
+  const UNKNOWN_SCORE = -4;
+
+  function segText(seg) {
+    return seg.map((t) => (t.t === 'num' ? t.raw : t.t === 'slash' ? '/' : t.w)).join(' ').replace(/ \/ /g, '/');
+  }
+
+  // Лучший товар для сегмента. Возвращает {score, result}.
   function matchSegment(seg, prepared) {
     const base = analyzeSegment(seg);
-    const text = seg.map((t) => (t.t === 'num' ? t.raw : t.t === 'slash' ? '/' : t.w)).join(' ').replace(/ \/ /g, '/');
-    if (!base.words.length && !base.sizes.length) return null;
+    const text = segText(seg);
     let best = null;
+    let second = null;
     for (const vr of variants(base)) {
       for (const p of prepared.products) {
         const r = scoreProduct(p, vr.a);
         if (!r) continue;
         r.score -= vr.penalty;
         r.note = vr.note;
-        if (!best || r.score > best.score) best = r;
+        if (!best || r.score > best.score) {
+          if (best && best.product !== r.product) second = best;
+          best = r;
+        } else if (r.product !== best.product && (!second || r.score > second.score)) second = r;
       }
     }
     if (!best) {
-      return { text, productIdx: null, qty: base.qty || 1, status: 'error', note: 'Товар не найден в каталоге' };
+      return {
+        score: UNKNOWN_SCORE - (base.words.length ? 0 : 6),
+        result: { text, hasWords: base.words.length > 0, productIdx: null, qty: base.qty || 1, status: 'error', note: 'Товар не найден в каталоге' },
+      };
     }
     const notes = [];
     if (best.note) notes.push(best.note);
-    if (best.missing) notes.push('размер не совпал полностью');
+    const close = second && second.score > best.score - 2;
+    // Размер не назван, а товаров с таким названием несколько — надо проверить.
+    if (best.missing && (best.spokenSizes > 0 || close)) notes.push('размер не совпал — проверьте');
+    else if (close) notes.push('похожий товар: ' + second.product.name);
     if (best.extra.length) notes.push('лишние числа: ' + best.extra.join(', '));
-    if (best.ws < 0.8) notes.push('название распознано неточно');
+    if (best.ws < 0.75) notes.push('название распознано неточно');
     let qty = best.qty === null ? 1 : best.qty;
     if (best.qty === null) notes.push('количество не названо, поставлено 1');
     if (!(qty > 0)) qty = 1;
-    const status = notes.length ? 'warn' : 'ok';
-    return { text, productIdx: best.product.idx, qty, status, note: notes.join('; ') };
+    return {
+      score: best.score,
+      result: { text, productIdx: best.product.idx, qty, status: notes.length ? 'warn' : 'ok', note: notes.join('; ') },
+    };
+  }
+
+  // ---------- разбиение фразы на позиции ----------
+  // Перебираем все разбиения и берём то, где товары узнаются лучше всего.
+  const SEG_COST = 8;
+  const MAX_SEG = 14;
+
+  function splitChunks(tokens) {
+    const chunks = [];
+    let cur = [];
+    for (const tk of tokens) {
+      if (tk.t === 'sep') {
+        if (cur.length) chunks.push(cur);
+        cur = [];
+      } else cur.push(tk);
+    }
+    if (cur.length) chunks.push(cur);
+    return chunks;
+  }
+
+  function canStart(tk) {
+    return tk.t === 'word' && !QTY_WORDS.test(tk.w) && !LENGTH_WORDS.test(tk.w) && !STOP_WORDS.has(tk.w);
+  }
+
+  function bestSplit(chunk, prepared) {
+    const n = chunk.length;
+    const best = new Array(n + 1).fill(-Infinity);
+    const from = new Array(n + 1).fill(-1);
+    const res = new Array(n + 1);
+    best[0] = 0;
+    for (let i = 1; i <= n; i++) {
+      for (let j = Math.max(0, i - MAX_SEG); j < i; j++) {
+        if (best[j] === -Infinity) continue;
+        // Позиция начинается с названия, а не с числа (кроме самого начала фразы).
+        if (j > 0 && !canStart(chunk[j])) continue;
+        const seg = chunk.slice(j, i);
+        if (!seg.some((t) => t.t === 'word' || t.t === 'num')) continue;
+        const m = matchSegment(seg, prepared);
+        const total = best[j] + m.score - SEG_COST;
+        if (total > best[i]) {
+          best[i] = total;
+          from[i] = j;
+          res[i] = m.result;
+        }
+      }
+    }
+    const out = [];
+    for (let i = n; i > 0 && from[i] >= 0; i = from[i]) out.unshift(res[i]);
+    return out;
   }
 
   // Главная функция: текст → позиции.
   function parse(text, prepared) {
     let tokens = tokenize(text);
     tokens = mergeSplitWords(tokens, prepared.vocab);
-    return segment(tokens, prepared.vocab)
-      .map((s) => matchSegment(s, prepared))
-      .filter(Boolean);
+    // служебные слова в начале и «и» между позициями не мешают разбору
+    tokens = tokens.filter((t) => !(t.t === 'word' && t.w === 'и'));
+    const out = [];
+    for (const chunk of splitChunks(tokens)) out.push(...bestSplit(chunk, prepared));
+    // Непонятные кусочки без слов («1 штука») или только из служебных слов не показываем.
+    return out.filter((r) => r.productIdx !== null || r.hasWords);
   }
 
   const api = { normalize, tokenize, prepareCatalog, parse, wordSim };
