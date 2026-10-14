@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f6f43">
+  <title>Накладная голосом</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Экран набора накладной -->
+  <section id="screen-draft" class="screen">
+    <header class="topbar">
+      <h1>Новая накладная</h1>
+      <button id="btn-settings" class="icon-btn" aria-label="Настройки">⚙</button>
+    </header>
+
+    <div id="catalog-warning" class="banner hidden">
+      Каталог не загружен. <button id="btn-open-settings" class="link-btn">Загрузить каталог</button>
+    </div>
+
+    <main id="items" class="items"></main>
+    <div id="empty" class="empty">
+      Нажмите на микрофон и продиктуйте товары, например:<br>
+      <i>«полуотвод диаметр 50, 2 штуки, труба 50, 3 штуки»</i>
+    </div>
+
+    <footer class="bottom">
+      <div id="live" class="live hidden"></div>
+      <div id="speech-msg" class="speech-msg hidden"></div>
+      <div class="total-row">
+        <span>Итого:</span>
+        <b id="total">0</b>
+      </div>
+      <div class="input-row">
+        <textarea id="text-input" rows="1" placeholder="Или напишите / надиктуйте с клавиатуры"></textarea>
+        <button id="btn-add-text" class="btn">Добавить</button>
+      </div>
+      <div class="action-row">
+        <button id="btn-mic" class="mic" aria-label="Диктовать">🎤</button>
+        <button id="btn-make" class="btn primary big">Сформировать накладную</button>
+      </div>
+    </footer>
+  </section>
+
+  <!-- Готовая накладная -->
+  <section id="screen-invoice" class="screen hidden">
+    <header class="topbar no-print">
+      <button id="btn-back" class="icon-btn" aria-label="Назад">←</button>
+      <h1>Накладная</h1>
+      <span></span>
+    </header>
+    <div id="invoice" class="invoice"></div>
+    <div class="invoice-actions no-print">
+      <button id="btn-share-img" class="btn primary">Отправить картинкой (WhatsApp)</button>
+      <button id="btn-share-text" class="btn">Отправить текстом</button>
+      <button id="btn-print" class="btn">Печать / сохранить PDF</button>
+      <button id="btn-new" class="btn danger">Новая накладная</button>
+    </div>
+  </section>
+
+  <!-- Настройки -->
+  <dialog id="dlg-settings">
+    <form method="dialog" class="dlg">
+      <h2>Настройки</h2>
+      <section>
+        <h3>Каталог товаров</h3>
+        <p id="catalog-info" class="muted"></p>
+        <label class="btn file-btn">
+          Загрузить из Excel / CSV
+          <input id="file-catalog" type="file" accept=".xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv">
+        </label>
+        <button id="btn-sample" type="button" class="btn">Загрузить пример каталога</button>
+        <p class="muted small">В таблице нужны колонки «Наименование» и «Цена». Колонка «Синонимы» — как ещё называют товар, через запятую.</p>
+        <button id="btn-view-catalog" type="button" class="link-btn">Посмотреть каталог</button>
+      </section>
+      <section>
+        <h3>Номер менеджера</h3>
+        <select id="sel-manager">
+          <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+          <option>6</option><option>7</option><option>8</option><option>9</option>
+        </select>
+        <p class="muted small">Ставится в номер накладной: ДДММ-<b>1</b>00-NN</p>
+      </section>
+      <section>
+        <h3>Распознавание речи без интернета</h3>
+        <p id="speech-info" class="muted small"></p>
+        <button id="btn-install-speech" type="button" class="btn">Проверить / скачать русский язык</button>
+        <p class="muted small">Если кнопка микрофона не работает без интернета — нажмите на поле ввода и используйте микрофон на клавиатуре (Gboard). В настройках Gboard → Голосовой ввод → Распознавание офлайн скачайте русский язык.</p>
+      </section>
+      <div class="dlg-actions"><button class="btn primary">Готово</button></div>
+    </form>
+  </dialog>
+
+  <!-- Выбор товара -->
+  <dialog id="dlg-pick">
+    <div class="dlg">
+      <h2 id="pick-title">Выберите товар</h2>
+      <input id="pick-search" type="search" placeholder="Поиск">
+      <ul id="pick-list" class="pick-list"></ul>
+      <div class="dlg-actions"><button id="pick-cancel" class="btn">Закрыть</button></div>
+    </div>
+  </dialog>
+
+  <script src="vendor/xlsx.mini.min.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/catalog.js"></script>
+  <script src="js/invoice.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
