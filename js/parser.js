@@ -47,8 +47,15 @@
     s = s.replace(/([a-zа-я])(\d)/g, '$1 $2').replace(/(\d)([a-zа-я])/g, '$1 $2');
     s = s.replace(/[,;.!?]+(?!\d)/g, ' , ');
     s = s.replace(/[«»"()\-–—:]+/g, ' ');
+    // Латиницу пишем русскими буквами: «Wilo» = «вило», «ERA» = «эра» (э → е).
+    s = s.replace(/[a-z]/g, (c) => LAT[c]).replace(/э/g, 'е');
     return s.replace(/\s+/g, ' ').trim();
   }
+
+  const LAT = {
+    a: 'а', b: 'б', c: 'к', d: 'д', e: 'е', f: 'ф', g: 'г', h: 'х', i: 'и', j: 'й', k: 'к', l: 'л', m: 'м',
+    n: 'н', o: 'о', p: 'п', q: 'к', r: 'р', s: 'с', t: 'т', u: 'у', v: 'в', w: 'в', x: 'кс', y: 'й', z: 'з',
+  };
 
   // Токены: {t:'num', v, raw} | {t:'word', w} | {t:'sep'} | {t:'slash'}
   function tokenize(text) {
@@ -358,7 +365,7 @@
     return list;
   }
 
-  const UNKNOWN_SCORE = -4;
+  const UNKNOWN_SCORE = 0;
 
   function segText(seg) {
     return seg.map((t) => (t.t === 'num' ? t.raw : t.t === 'slash' ? '/' : t.w)).join(' ').replace(/ \/ /g, '/');

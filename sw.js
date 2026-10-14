@@ -1,6 +1,6 @@
 // Офлайн-режим: все файлы приложения хранятся на телефоне.
 // При изменении файлов увеличивайте VERSION, чтобы телефоны получили обновление.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const FILES = [
   './',
   'index.html',
@@ -11,7 +11,7 @@ const FILES = [
   'js/invoice.js',
   'js/app.js',
   'vendor/xlsx.mini.min.js',
-  'sample/catalog-example.csv',
+  'sample/catalog.csv',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',

@@ -416,14 +416,14 @@
   $('sel-manager').addEventListener('change', (e) => localStorage.setItem(MANAGER_KEY, e.target.value));
   $('btn-view-catalog').addEventListener('click', () => openPicker(null));
 
-  function catalogLoaded(res) {
+  function catalogLoaded(res, silent) {
     catalog = res.cat;
     prepared = Parser.prepareCatalog(catalog.items);
     refreshSettings();
     render();
     let msg = 'Каталог загружен: ' + catalog.items.length + ' товаров.';
     if (res.skipped.length) msg += '\nПропущены без цены: ' + res.skipped.join(', ');
-    alert(msg);
+    if (!silent) alert(msg);
   }
 
   $('file-catalog').addEventListener('change', async (e) => {
@@ -436,11 +436,23 @@
     }
     e.target.value = '';
   });
+  // Встроенный каталог магазина. При изменении sample/catalog.csv увеличьте версию —
+  // телефоны со встроенным каталогом обновят его сами (загруженный из файла не трогаем).
+  const BUILTIN_SOURCE = 'встроенный каталог';
+  const BUILTIN_VERSION = 1;
+
+  async function loadBuiltin(silent) {
+    const res = await Catalog.fromUrl('sample/catalog.csv', BUILTIN_SOURCE);
+    res.cat.version = BUILTIN_VERSION;
+    Catalog.save(res.cat);
+    catalogLoaded(res, silent);
+  }
+
   $('btn-sample').addEventListener('click', async () => {
     try {
-      catalogLoaded(await Catalog.fromUrl('sample/catalog-example.csv', 'пример'));
+      await loadBuiltin(false);
     } catch (err) {
-      alert('Не удалось загрузить пример: ' + err.message);
+      alert('Не удалось загрузить каталог: ' + err.message);
     }
   });
 
@@ -471,6 +483,9 @@
 
   // ---------- старт ----------
   render();
+  if (!catalog || (catalog.source === BUILTIN_SOURCE && catalog.version !== BUILTIN_VERSION)) {
+    loadBuiltin(true).catch(() => {});
+  }
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
